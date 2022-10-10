@@ -17,11 +17,14 @@ contract NaiveReceiverEchidna {
 
     // Setup echidna test by deploying the flash loan pool and receiver and sending them some ether.
     constructor() payable {
-	// complete me
+        pool = new NaiveReceiverLenderPool();
+        receiver = new FlashLoanReceiver(payable(address(pool)));
+        payable(address(pool)).sendValue(ETHER_IN_POOL);
+        payable(address(receiver)).sendValue(ETHER_IN_RECEIVER);
     }
 
     // We want to test whether the balance of the receiver contract can be decreased.
-    function echidna_test() public view returns (bool) {
-	// complete me
+    function echidna_test_contract_balance() public view returns (bool) {
+        return address(receiver).balance >= 10 ether;
     }
 }

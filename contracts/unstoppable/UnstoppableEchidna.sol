@@ -16,14 +16,27 @@ contract UnstoppableEchidna {
 
     // Setup echidna test by deploying the flash loan pool, approving it for token transfers, sending it tokens, and sending the attacker some tokens.
     constructor() public payable {
-	// Complete me
+        token = new DamnValuableToken();
+        pool = new UnstoppableLender(address(token));
+        token.approve(address(pool), ETHER_IN_POOL);
+        pool.depositTokens(ETHER_IN_POOL);
+        token.transfer(msg.sender, INITIAL_ATTACKER_BALANCE);
     }
 
-    // There is a callback mechanism that is missing from this contract
+    // This is the callback function for flash loan receivers.
+    function receiveTokens(address tokenAddress, uint256 amount) external {
+        require(msg.sender == address(pool), "Sender must be pool");
+        // Return all tokens to the pool
+        require(
+            IERC20(tokenAddress).transfer(msg.sender, amount),
+            "Transfer of tokens failed"
+        );
+    }
 
     // This is the Echidna property entrypoint.
     // We want to test whether flash loans can always be made.
     function echidna_testFlashLoan() public returns (bool) {
-	// Complete me
+        pool.flashLoan(10);
+        return true;
     }
 }
