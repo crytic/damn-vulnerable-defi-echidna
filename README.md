@@ -5,6 +5,10 @@ This repo is meant to be used with exercises 5 and 6 of [Building-secure-contrac
 Only two challenges are currently supported (naive receiver, and unstoppable).
 The changes made to the origina repo:
 - Remove the `dependencyCompiler` section in `hardhat.config.js`
+- Add two Echidna config files (`unstoppable.yaml`, `naivereceiver.yaml`)
+- Add two templates (consider doing the exercises without looking at the templates first):
+  - [contracts/unstoppable/UnstoppableEchidna.sol](contracts/unstoppable/UnstoppableEchidna.sol)
+  - [contracts/naive-receiver/NaiveReceiverEchidna.sol](contracts/naive-receiver/NaiveReceiverEchidna.sol)
 - Enable transfers of tokens in `contracts/the-rewarder/AccountingToken.sol` (the original mock token does not allow transfers, limiting the fuzzer exploration)
 
 Below is the original readme
