@@ -15,10 +15,13 @@ module.exports = {
         { version: "0.6.6" }
       ]
     },
+    /* This is removed for compatibility with crytic-compile
+
     dependencyCompiler: {
       paths: [
         '@gnosis.pm/safe-contracts/contracts/GnosisSafe.sol',
         '@gnosis.pm/safe-contracts/contracts/proxies/GnosisSafeProxyFactory.sol',
       ],
     }
+    */
 }
