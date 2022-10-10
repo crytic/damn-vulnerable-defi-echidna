@@ -4,7 +4,7 @@ import "./NaiveReceiverLenderPool.sol";
 import "./FlashLoanReceiver.sol";
 import "@openzeppelin/contracts/utils/Address.sol";
 
-contract TestNaiveReceiverEchidna {
+contract NaiveReceiverEchidna {
     using Address for address payable;
 
     // We will send ETHER_IN_POOL to the flash loan pool.
