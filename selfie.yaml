@@ -1,0 +1,10 @@
+testMode: assertion
+testLimit: 50000
+
+deployer: '0x10000'
+sender: ['0x30000'] # to have a different sender then deployer
+
+# fixes the issue with constructor
+# revert, out-of-gas, sending ether to an non-payable constructor
+codeSize: 0xffffffffff
+# corpusDir: './contracts/selfie/echidna/corpus'
