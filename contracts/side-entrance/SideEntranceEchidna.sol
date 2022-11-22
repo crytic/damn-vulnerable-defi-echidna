@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.4;
 
-import "./side-entrance/SideEntranceLenderPool.sol";
+import "./SideEntranceLenderPool.sol";
 
 contract PoolDeployer {
     function deployNewPool() public payable returns (SideEntranceLenderPool) {
