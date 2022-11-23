@@ -1,0 +1,9 @@
+testMode: assertion
+testLimit: 100000
+
+deployer: '0x10000'
+sender: ['0x30000'] # to have a different sender of TXs then deployer
+
+# fixes the issue with a constructor on:
+# revert, out-of-gas, sending ether to an non-payable constructor
+codeSize: 0xffffffffff
