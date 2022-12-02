@@ -1,5 +1,5 @@
 testMode: assertion
-testLimit: 50000
+testLimit: 250000
 
 deployer: '0x10000'
 sender: ['0x30000'] # to have a different sender then deployer
