@@ -39,8 +39,10 @@ contract EchidnaSelfie {
     uint256 private ACTION_DELAY_IN_SECONDS = 2 days;
     uint256 private TOKENS_IN_POOL = 1_500_000 ether;
 
-    uint256 private actionId; // to track id of queued actions
-    uint256[] private actionsToBeCalled; // actions to be called in callback function
+    uint256[] private actionIds; // to track id of queued actions
+    uint256 private actionIdCounter; // to load proper actionId in executeAction()
+
+    uint256[] private callbackActionsToBeCalled; // actions to be called in callback function
 
     // all possible actions for callback
     enum CallbackActions {
@@ -51,28 +53,43 @@ contract EchidnaSelfie {
     }
     uint256 private callbackActionsLength = 4; // must correspond with the length of Actions
 
-    // queueAction payloads to be created by Echidna
-    enum PayloadsForQueueAction {
+    // queueAction payload types to be created by Echidna
+    enum PayloadTypesInQueueAction {
         noPayloadSet, // only for logging purposes
         drainAllFunds,
         transferFrom
     }
-    uint256 private payloadsLength = 2; // must correspond with the length of Payloads
-    uint256 private _payloadSetTo; // to know which payload has been set (logging purposes)
-    // queueAction parameters:
-    bytes private _payload; // current payload for queueAction
-    uint256 private _weiAmountForQueueAction; // the second queueAction parameters
+    uint256 private payloadsLength = 3; // must correspond with the length of Payloads
 
-    uint256 private _amountForTransferFromInCallback; // transfer function parameter
+    struct Payload {
+        uint256 payloadIdentifier; // setPayload -> logging purposes
+        bytes payload; // setPayload
+        address receiver; // setPayload
+        uint256 weiAmount; // push
+        uint256 transferAmount; // setPayload -> used only if payloadIdentifier == uint256(PayloadTypesInQueueAction.transferFrom)
+    }
+    // internal counter to payload created
+    mapping(uint256 => Payload) payloads;
+
+    uint256 private payloadsPushedCounter; // counter of payloads created
+    uint256 private payloadsQueuedCounter; // counter of payloads queued
+    uint256 private payloadsExecutedCounter; // counter of payloads executed via callbacks
+    uint256 private payloadsEventsCounter; // logging purposes
+
+    uint256[] private _transferAmountInCallback; // amount for transferFrom called in callback function
+    uint256 private _transferAmountInCallbackCounter; // counter of the
+    uint256 private _transferAmountInCallbackTrackerCounter; // used only for logging purposes
 
     SelfiePool pool;
     SimpleGovernance governance;
     DamnValuableTokenSnapshot token;
 
+    // EVENTS
     event ActionCalledInCallback(string action); // to track which actions has been called in callback
     event AssertionFailed(string reason);
-    event PayloadInQueueActionSetTo(string payload);
-    event PayloadVariable(string name, uint256 variable);
+    event QueueActionPayloadSetTo(string payload);
+    event QueueActionVariable(string name, uint256 variable);
+    event CallbackVariable(string name, uint256 variable);
 
     constructor() payable {
         SelfieDeployment deployer;
@@ -108,10 +125,10 @@ contract EchidnaSelfie {
      * @notice actions to be called once receiveTokens() of this contract is called
      */
     function callbackActions() internal {
-        uint256 genArrLength = actionsToBeCalled.length;
+        uint256 genArrLength = callbackActionsToBeCalled.length;
         if (genArrLength != 0) {
             for (uint256 i; i < genArrLength; i++) {
-                callAction(actionsToBeCalled[i]);
+                callAction(callbackActionsToBeCalled[i]);
             }
         } else {
             revert("actionsToBeCalled is empty, no action called");
@@ -133,9 +150,7 @@ contract EchidnaSelfie {
         }
         // queue an action
         if (_num == uint256(CallbackActions.queueAction)) {
-            try this.queueAction() {} catch {
-                revert("queueAction unsuccessful");
-            }
+            callbackQueueAction();
         }
         // execute an action
         if (_num == uint256(CallbackActions.executeAction)) {
@@ -145,56 +160,91 @@ contract EchidnaSelfie {
         }
     }
 
-    //////////////////////
-    // CALLBACK ACTIONS //
-    //////////////////////
+    /////////////
+    // ACTIONS //
+    /////////////
 
-    // 1: drainAllFunds()
+    ////////////////////////
+    // 1: drainAllFunds() //
     function drainAllFunds() public {
         pool.drainAllFunds(address(this));
     }
 
     function pushDrainAllFundsToCallback() external {
-        actionsToBeCalled.push(uint256(CallbackActions.drainAllFunds));
+        callbackActionsToBeCalled.push(uint256(CallbackActions.drainAllFunds));
     }
 
     ///////////////////////
     // 2: transferFrom() //
-    function transferFrom(uint256 _amount) external {
+    function transferFrom(uint256 _amount) public {
         require(_amount > 0, "Cannot transfer zero tokens");
         token.transferFrom(address(pool), address(this), _amount);
     }
 
-    // @note callable only in a callback
     function callbackTransferFrom() internal {
-        token.transferFrom(
-            address(pool),
-            address(this),
-            _amountForTransferFromInCallback
-        );
+        // get the amount of tokens to be transfered
+        uint256 _amount = _transferAmountInCallback[
+            _transferAmountInCallbackCounter
+        ];
+        // increase the counter
+        ++_transferAmountInCallbackCounter;
+        // call the transfer function
+        transferFrom(_amount);
     }
 
     function pushTransferFromToCallback(uint256 _amount) external {
         require(_amount > 0, "Cannot transfer zero tokens");
-        _amountForTransferFromInCallback = _amount;
-        actionsToBeCalled.push(uint256(CallbackActions.transferFrom));
+        _transferAmountInCallback.push(_amount);
+        callbackActionsToBeCalled.push(uint256(CallbackActions.transferFrom));
     }
 
     //////////////////////
     // 3: queueAction() //
-    function queueAction() public {
+
+    function callbackQueueAction() internal {
+        try this.callQueueAction() {} catch {}
+        // no matter the output of the action queued, increase the counter to be able
+        // to iterate over all payloads created for queueActions() in callback
+        ++payloadsQueuedCounter;
+    }
+
+    /**
+     * @dev this function is filtered out for direct calls by Echidna (see ./config.yaml)
+     */
+    function callQueueAction() public {
         require(
-            address(this).balance >= _weiAmountForQueueAction,
+            msg.sender == address(this),
+            "Only this contract can call queueAction"
+        );
+        // cache the counter
+        uint256 counter = payloadsQueuedCounter;
+        // get queueAction parameters based on counter choosen
+        uint256 _weiAmount = payloads[counter].weiAmount;
+        require(
+            address(this).balance >= _weiAmount,
             "Not sufficient account balance to queue an action"
         );
+        address _receiver = payloads[counter].receiver;
+        bytes memory _payload = payloads[counter].payload;
+        // call queueAction
+        queueAction(_receiver, _payload, _weiAmount);
+    }
+
+    function queueAction(
+        address _receiver,
+        bytes memory _payload,
+        uint256 _weiAmount
+    ) internal {
         // take a snaphost first as it is needed in queueAction()
         token.snapshot();
-        // queue the action;
-        actionId = governance.queueAction(
-            address(pool),
+        // queue the action
+        uint256 actionId = governance.queueAction(
+            _receiver,
             _payload,
-            _weiAmountForQueueAction
+            _weiAmount
         );
+        // store actionIds
+        actionIds.push(actionId);
     }
 
     function pushQueueActionToCallback(
@@ -206,14 +256,13 @@ contract EchidnaSelfie {
             address(this).balance >= _weiAmount,
             "Not sufficient account balance to queue an action"
         );
-        if (_payloadNum == uint256(PayloadsForQueueAction.transferFrom)) {
+        if (_payloadNum == uint256(PayloadTypesInQueueAction.transferFrom)) {
             require(_amountToTransfer > 0, "Cannot transfer 0 tokens");
         }
         // Add the action into callback array
-        actionsToBeCalled.push(uint256(CallbackActions.queueAction));
-        // Define parameters
-        // 1: set WEI for queue action
-        _weiAmountForQueueAction = _weiAmount;
+        callbackActionsToBeCalled.push(uint256(CallbackActions.queueAction));
+        // update payloads mapping
+        payloads[payloadsPushedCounter].weiAmount = _weiAmount;
         // 2: create payload
         setPayload(_payloadNum, _amountToTransfer);
     }
@@ -228,29 +277,47 @@ contract EchidnaSelfie {
     ) internal {
         // optimization: to create only valid payloads, narrow down the _payloadNum
         _payloadNum = _payloadNum % payloadsLength;
-        // update the state to know which payload was used in queueAction() (logging purposes, see emitPayloadCreated())
-        _payloadSetTo = _payloadNum;
+        // cache counter
+        uint256 _counter = payloadsPushedCounter;
+        // store payload identifier
+        payloads[_counter].payloadIdentifier = _payloadNum;
         // create payload of drainAllFunds
-        if (_payloadNum == uint256(PayloadsForQueueAction.drainAllFunds)) {
+        bytes memory _payload;
+        address _receiver;
+        if (_payloadNum == uint256(PayloadTypesInQueueAction.drainAllFunds)) {
             _payload = abi.encodeWithSignature(
                 "drainAllFunds(address)",
                 address(this)
             );
+            _receiver = address(pool);
         }
         // create payload of transfer
-        if (_payloadNum == uint256(PayloadsForQueueAction.transferFrom)) {
+        if (_payloadNum == uint256(PayloadTypesInQueueAction.transferFrom)) {
+            // _transferAmountInPayload.push(_amountToTransfer);
             _payload = abi.encodeWithSignature(
                 "transferFrom(address,address,uint256)",
                 address(pool),
                 address(this),
                 _amountToTransfer
             );
+            _receiver = address(token);
+            // store amount to transfer
+            payloads[_counter].transferAmount = _amountToTransfer;
         }
+        // fill payload mapping
+        payloads[_counter].payload = _payload;
+        payloads[_counter].receiver = _receiver;
+        // increase payload counter
+        ++payloadsPushedCounter;
     }
 
     ////////////////////////
     // 4: executeAction() //
     function executeAction() public {
+        // get the first unexecuted actionId
+        uint256 actionId = actionIds[actionIdCounter];
+        // increase action Id counter
+        actionIdCounter = actionIdCounter + 1;
         // get data related to the action to be executed
         (, , uint256 weiAmount, uint256 proposedAt, ) = governance.actions(
             actionId
@@ -265,10 +332,12 @@ contract EchidnaSelfie {
         );
         // Action
         governance.executeAction{value: weiAmount}(actionId);
+        // increase counter of payloads executed
+        ++payloadsExecutedCounter;
     }
 
     function pushExecuteActionToCallback() external {
-        actionsToBeCalled.push(uint256(CallbackActions.executeAction));
+        callbackActionsToBeCalled.push(uint256(CallbackActions.executeAction));
     }
 
     /////////////
@@ -293,6 +362,12 @@ contract EchidnaSelfie {
     function emitActionExecuted(uint256 _actionNumber) internal {
         if (_actionNumber == uint256(CallbackActions.queueAction)) {
             emit ActionCalledInCallback("queueAction()");
+            uint256 _counter = payloadsEventsCounter;
+            if (_counter < payloadsExecutedCounter + 1) {
+                //
+                emitQueueActionDetails(_counter);
+            }
+            ++payloadsEventsCounter;
         }
         if (_actionNumber == uint256(CallbackActions.executeAction)) {
             emit ActionCalledInCallback("executeAction()");
@@ -302,25 +377,41 @@ contract EchidnaSelfie {
         }
         if (_actionNumber == uint256(CallbackActions.transferFrom)) {
             emit ActionCalledInCallback("transferFrom()");
+            uint256 _transferedAmout = _transferAmountInCallback[
+                _transferAmountInCallbackTrackerCounter
+            ];
+            ++_transferAmountInCallbackTrackerCounter;
+            emit CallbackVariable("_transferedAmout: ", _transferedAmout);
         }
     }
 
     /**
      * @notice emit event of a payload created in queueAction()
      */
-    function emitPayloadCreated() internal {
-        if (_payloadSetTo == uint256(PayloadsForQueueAction.drainAllFunds)) {
-            emit PayloadInQueueActionSetTo("drainAllFunds(address)");
+    function emitQueueActionDetails(uint256 _payloadNumber) internal {
+        // cache data
+        Payload memory _payload = payloads[_payloadNumber];
+        uint256 _weiAmount = _payload.weiAmount;
+        uint256 _payloadId = _payload.payloadIdentifier;
+        uint256 _transferAmount = _payload.transferAmount;
+        // emit events
+        if (_payloadId == uint256(PayloadTypesInQueueAction.drainAllFunds)) {
+            emit QueueActionPayloadSetTo("drainAllFunds(address)");
+            emit QueueActionVariable(
+                "PARAMETER `_transferAmount` NOT USED",
+                _transferAmount
+            );
         }
-        if (_payloadSetTo == uint256(PayloadsForQueueAction.transferFrom)) {
-            emit PayloadInQueueActionSetTo(
+        if (_payloadId == uint256(PayloadTypesInQueueAction.transferFrom)) {
+            emit QueueActionPayloadSetTo(
                 "transferFrom(address,address,uint256)"
             );
-            emit PayloadVariable(
-                "_amountToTransfer",
-                _amountForTransferFromInCallback
+            emit QueueActionVariable(
+                "_transferAmount",
+                _payload.transferAmount
             );
         }
+        emit QueueActionVariable("_weiAmount", _weiAmount);
     }
 
     ////////////////
@@ -333,18 +424,9 @@ contract EchidnaSelfie {
         try this._checkPoolBalance() {
             // pool balance has not changed
         } catch {
-            // log if payload has been set
-            if (_payloadSetTo != uint256(PayloadsForQueueAction.noPayloadSet)) {
-                emit PayloadVariable(
-                    "_weiAmountForQueueAction: ",
-                    _weiAmountForQueueAction
-                );
-                emitPayloadCreated();
-            }
-            // log actions called
-            uint256 actionsArrLength = actionsToBeCalled.length;
+            uint256 actionsArrLength = callbackActionsToBeCalled.length;
             for (uint256 i; i < actionsArrLength; i++) {
-                emitActionExecuted(actionsToBeCalled[i]);
+                emitActionExecuted(callbackActionsToBeCalled[i]);
             }
             // emit assertion violation
             emit AssertionFailed("Invariant broken");
