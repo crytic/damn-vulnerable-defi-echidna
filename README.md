@@ -17,6 +17,19 @@ Featuring flash loans, price oracles, governance, NFTs, lending pools, smart con
 
 Created by [@tinchoabbate](https://twitter.com/tinchoabbate)
 
+## Usage
+
+You will need  [Echidna](https://github.com/crytic/echidna) installed before proceeding.
+
+Install the dependencies via `yarn install`.
+
+```sh
+git clone https://github.com/crytic/damn-vulnerable-defi-echidna
+cd damn-vulnerable-defi-echidna
+yarn install
+echidna-test <contract_path> --contract <contract_name> --config echidna-config.yaml
+```
+
 ## Play
 
 Visit [damnvulnerabledefi.xyz](https://damnvulnerabledefi.xyz)
