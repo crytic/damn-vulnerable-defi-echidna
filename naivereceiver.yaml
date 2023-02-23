@@ -2,3 +2,5 @@
 balanceContract: 10000000000000000000000
 # Allow for multi-abi use
 multi-abi: true
+# multi-abi was renamed in echidna >= 2.1
+allContracts: true
