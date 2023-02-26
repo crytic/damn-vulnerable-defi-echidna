@@ -1,0 +1,4 @@
+corpusDir: 'contracts/puppet-v2/corpus'
+initialize: 'contracts/puppet-v2/init.json'
+testLimit: 5000
+balanceContract: 20000000000000000000 # 20 ETH
